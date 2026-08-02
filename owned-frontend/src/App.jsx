@@ -189,11 +189,11 @@ export default function App() {
   };
 
   // Wallet Topup Handler (Strict Backend POST /api/wallet/topup)
-  const handleTopupWallet = async (amount) => {
+  const handleTopupWallet = async (amount, provider) => {
     try {
-      const res = await api.topupWallet(amount);
+      const res = await api.topupWallet(amount, provider);
       if (res) {
-        showToast(`⚡ Top-up request sent to Backend for ₹${amount.toLocaleString('en-IN')}!`, 'success');
+        showToast(`⚡ Top-up of ₹${amount.toLocaleString('en-IN')} initiated via ${provider || 'UPI'}!`, 'success');
         loadWallet();
       }
     } catch (err) {

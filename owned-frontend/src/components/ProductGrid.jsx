@@ -36,9 +36,10 @@ export default function ProductGrid({
       </div>
 
       <div className="product-cards-grid">
-        {products.map((product) => (
+        {products.map((product, idx) => (
           <ProductCard
             key={product.id}
+            index={idx}
             product={product}
             onOpenDetail={onOpenDetail}
             onAddToCart={onAddToCart}

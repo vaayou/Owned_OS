@@ -41,27 +41,33 @@ async function request(endpoint, options = {}) {
   return await res.json();
 }
 
-// Normalizer to convert Backend DTOs to Frontend UI props
-const normalizeProduct = (p) => ({
-  id: p.id,
-  title: p.name || p.title,
-  subtitle: p.description ? (p.description.length > 50 ? p.description.slice(0, 50) + '...' : p.description) : '',
-  description: p.description || '',
-  categoryId: p.categoryId,
-  categoryName: p.categoryName || 'General',
-  tier: p.categoryTier || p.tier || 'EVERYDAY',
-  price: typeof p.priceCoins === 'number' ? p.priceCoins : parseFloat(p.priceCoins || p.price || 0),
-  originalPrice: (p.priceCoins ? p.priceCoins * 1.15 : p.price ? p.price * 1.15 : 0),
-  discountPercent: 12,
-  rating: p.rating || 4.8,
-  reviewCount: p.reviewCount || 42,
-  seller: 'Owned Vault Store',
-  stock: p.stock || 10,
-  inStock: p.isActive !== false,
-  certificateId: `CERT-OWNED-${p.id}`,
-  image: p.imageUrl || p.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600',
-  specs: ['Authentic Product', 'Verified Ownership', 'Instant Vault Sync']
-});
+// Normalizer for Product Catalog DTOs and Collection Item Snapshots DTOs
+const normalizeProduct = (p) => {
+  const priceVal = p.priceCoinsSnapshot ?? p.priceCoins ?? p.price ?? 0;
+  const parsedPrice = typeof priceVal === 'number' ? priceVal : parseFloat(priceVal || 0);
+
+  return {
+    id: p.id || p.productId,
+    productId: p.productId || p.id,
+    title: p.productNameSnapshot || p.name || p.title || 'Vault Item',
+    subtitle: p.serialNo ? `Serial: ${p.serialNo}` : (p.description ? (p.description.length > 50 ? p.description.slice(0, 50) + '...' : p.description) : 'Verified Vault Item'),
+    description: p.description || `Digital Vault collectible acquired on ${p.acquiredAt ? new Date(p.acquiredAt).toLocaleDateString() : 'Owned OS'}.`,
+    categoryId: p.categoryId || 1,
+    categoryName: p.categoryName || 'Digital Vault',
+    tier: p.categoryTier || p.tier || 'LUXURY',
+    price: parsedPrice,
+    originalPrice: parsedPrice > 0 ? parsedPrice * 1.15 : 0,
+    discountPercent: 12,
+    rating: p.rating || 5.0,
+    reviewCount: p.reviewCount || 1,
+    seller: 'Owned Vault Store',
+    stock: p.stock || 1,
+    inStock: p.isActive !== false,
+    certificateId: p.serialNo || (p.certificateId ? `CERT-OWNED-${p.certificateId}` : `CERT-OWNED-${p.id}`),
+    image: p.productImageSnapshot || p.imageUrl || p.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600',
+    specs: ['Immutable Ownership Record', `Acquired: ${p.acquiredAt ? new Date(p.acquiredAt).toLocaleDateString() : 'Recently'}`, `Serial No: ${p.serialNo || 'CERT-GENESIS'}`]
+  };
+};
 
 // API Gateway endpoints wrapper (Strict Backend Execution)
 export const api = {
@@ -107,7 +113,7 @@ export const api = {
 
     const queryString = params.toString() ? `?${params.toString()}` : '';
     const data = await request(`/products${queryString}`);
-    
+
     if (Array.isArray(data)) {
       return data.map(normalizeProduct);
     }
@@ -139,20 +145,21 @@ export const api = {
     };
   },
 
-  async topupWallet(amountInr) {
+  async topupWallet(amountInr, provider = 'RAZORPAY') {
     // 1. Initiate Top-up with Backend
     const topupData = await request('/wallet/topup', {
       method: 'POST',
-      body: JSON.stringify({ amountInr, provider: 'RAZORPAY' }),
+      body: JSON.stringify({ amountInr, provider }),
     });
 
     // 2. Auto-trigger payment webhook for instant sandbox success & balance update
     if (topupData && topupData.providerTxnId) {
+      const sigHeader = provider === 'UPI' ? { 'X-UPI-Signature': 'sandbox-signature' }
+        : (provider === 'STRIPE' ? { 'Stripe-Signature': 'sandbox-signature' } : { 'X-Razorpay-Signature': 'sandbox-signature' });
+
       await request(`/payments/webhook?providerTxnId=${topupData.providerTxnId}&eventType=payment.succeeded`, {
         method: 'POST',
-        headers: {
-          'X-Razorpay-Signature': 'sandbox-signature'
-        }
+        headers: sigHeader
       });
     }
 
@@ -169,7 +176,7 @@ export const api = {
     });
   },
 
-  // Collection Vault Endpoints
+  // Collection Vault Endpoints (Backend DTOs are CollectionItemResponse & NetWorthResponse)
   async getVaultCollection() {
     const data = await request('/collection/me');
     if (Array.isArray(data)) {
@@ -180,10 +187,12 @@ export const api = {
 
   async getNetWorth() {
     const data = await request('/collection/me/networth');
+    const netWorthVal = data.totalNetWorth ?? data.totalNetWorthInr ?? data.netWorth ?? 0;
+    const parsedNet = typeof netWorthVal === 'number' ? netWorthVal : parseFloat(netWorthVal || 0);
     return {
-      totalNetWorthInr: data.totalNetWorthInr || data.netWorth || 0,
-      itemCount: data.itemCount || 0,
-      tierRank: data.tierRank || 'COLLECTOR'
+      totalNetWorthInr: parsedNet,
+      itemCount: data.totalItemsOwned ?? data.itemCount ?? 0,
+      tierRank: parsedNet > 1000000 ? 'ULTRA VIP COLLECTOR' : (parsedNet > 100000 ? 'LUXURY COLLECTOR' : 'EVERYDAY COLLECTOR')
     };
   },
 
@@ -195,8 +204,8 @@ export const api = {
         rank: item.rank || idx + 1,
         username: item.username || `Collector_${idx + 1}`,
         avatar: item.avatar || `https://i.pravatar.cc/150?img=${idx + 10}`,
-        netWorth: item.netWorth || item.totalNetWorthInr || 0,
-        itemsOwned: item.itemsOwned || item.itemCount || 0,
+        netWorth: item.netWorth || item.totalNetWorth || item.totalNetWorthInr || 0,
+        itemsOwned: item.itemsOwned || item.totalItemsOwned || item.itemCount || 0,
         tier: item.tier || 'LUXURY'
       }));
     }

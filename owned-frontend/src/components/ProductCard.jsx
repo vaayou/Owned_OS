@@ -2,6 +2,7 @@ import React from 'react';
 
 export default function ProductCard({
   product,
+  index = 0,
   onOpenDetail,
   onAddToCart,
   onToggleWishlist,
@@ -16,7 +17,10 @@ export default function ProductCard({
   };
 
   return (
-    <div className="product-glass-card">
+    <div
+      className="product-glass-card"
+      style={{ animationDelay: `${index * 0.05}s` }}
+    >
       {/* Product Image Container */}
       <div className="product-image-frame" onClick={() => onOpenDetail(product)}>
         <img src={product.image} alt={product.title} className="product-image" />
@@ -73,7 +77,7 @@ export default function ProductCard({
         <div className="product-price-row">
           <div className="price-stack">
             <span className="product-price">₹{product.price.toLocaleString('en-IN')}</span>
-            {product.originalPrice && (
+            {product.originalPrice > 0 && (
               <span className="product-original-price">₹{product.originalPrice.toLocaleString('en-IN')}</span>
             )}
           </div>

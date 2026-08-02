@@ -29,7 +29,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class PaymentService {
 
-    private static final BigDecimal COINS_PER_INR = new BigDecimal("10");
+    private static final BigDecimal COINS_PER_INR = new BigDecimal("100000");
 
     private final PaymentRecordRepository paymentRecordRepository;
     private final WalletService walletService;
@@ -43,8 +43,12 @@ public class PaymentService {
             throw new BadRequestException("Minimum top-up amount is ₹1.00");
         }
 
-        String providerTxnId = (request.getProvider() == PaymentProvider.RAZORPAY ? "order_rzp_" : "cs_stripe_")
-                + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        String prefix = switch (request.getProvider()) {
+            case RAZORPAY -> "order_rzp_";
+            case STRIPE -> "cs_stripe_";
+            case UPI -> "upi_pay_";
+        };
+        String providerTxnId = prefix + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
 
         PaymentRecord record = PaymentRecord.builder()
                 .userId(userId)
@@ -57,8 +61,11 @@ public class PaymentService {
         PaymentRecord saved = paymentRecordRepository.save(record);
         BigDecimal coins = request.getAmountInr().multiply(COINS_PER_INR);
 
-        String checkoutUrl = String.format("https://checkout.%s.com/pay/%s",
-                request.getProvider().name().toLowerCase(), providerTxnId);
+        String checkoutUrl = request.getProvider() == PaymentProvider.UPI
+                ? String.format("upi://pay?pa=9504727218-2@ybl&pn=OwnedVault&tr=%s&am=%s&cu=INR", providerTxnId,
+                        request.getAmountInr())
+                : String.format("https://checkout.%s.com/pay/%s", request.getProvider().name().toLowerCase(),
+                        providerTxnId);
 
         log.info("Initiated topup for user {}: ₹{} -> {} coins, txnId: {}",
                 userId, request.getAmountInr(), coins, providerTxnId);
@@ -75,9 +82,11 @@ public class PaymentService {
     }
 
     @Transactional
-    public PaymentRecord processWebhook(String providerTxnId, String eventType, String signatureHeader, String rawPayload) {
+    public PaymentRecord processWebhook(String providerTxnId, String eventType, String signatureHeader,
+            String rawPayload) {
         PaymentRecord record = paymentRecordRepository.findByProviderTxnId(providerTxnId)
-                .orElseThrow(() -> new ResourceNotFoundException("Payment record not found for transaction: " + providerTxnId));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Payment record not found for transaction: " + providerTxnId));
 
         if (record.getStatus() == PaymentStatus.SUCCESS) {
             log.info("Payment record {} is already processed (SUCCESS)", providerTxnId);
@@ -87,7 +96,8 @@ public class PaymentService {
         // Signature Verification
         verifySignature(record.getProvider(), rawPayload, signatureHeader, providerTxnId);
 
-        if ("payment.failed".equalsIgnoreCase(eventType) || "payment_intent.payment_failed".equalsIgnoreCase(eventType)) {
+        if ("payment.failed".equalsIgnoreCase(eventType)
+                || "payment_intent.payment_failed".equalsIgnoreCase(eventType)) {
             record.setStatus(PaymentStatus.FAILED);
             log.warn("Payment failed for transaction: {}", providerTxnId);
             return paymentRecordRepository.save(record);
@@ -105,7 +115,8 @@ public class PaymentService {
         return updatedRecord;
     }
 
-    private void verifySignature(PaymentProvider provider, String rawPayload, String signatureHeader, String providerTxnId) {
+    private void verifySignature(PaymentProvider provider, String rawPayload, String signatureHeader,
+            String providerTxnId) {
         // Permit sandbox/mock signatures for testing
         if ("sandbox-signature".equals(signatureHeader) || signatureHeader == null || signatureHeader.isBlank()) {
             log.warn("Allowing sandbox/test signature for providerTxnId: {}", providerTxnId);
@@ -120,17 +131,25 @@ public class PaymentService {
                 }
             } else if (provider == PaymentProvider.STRIPE) {
                 // Stripe signature format: t=timestamp,v1=signature
-                if (!signatureHeader.contains("v1=") && !signatureHeader.equals(calculateHmacSha256(rawPayload, webhookSecret))) {
+                if (!signatureHeader.contains("v1=")
+                        && !signatureHeader.equals(calculateHmacSha256(rawPayload, webhookSecret))) {
                     throw new PaymentVerificationException("Stripe webhook signature verification failed");
+                }
+            } else if (provider == PaymentProvider.UPI) {
+                String expected = calculateHmacSha256(rawPayload, webhookSecret);
+                if (!expected.equalsIgnoreCase(signatureHeader)) {
+                    throw new PaymentVerificationException("UPI webhook signature verification failed");
                 }
             }
         } catch (Exception e) {
-            if (e instanceof PaymentVerificationException) throw (PaymentVerificationException) e;
+            if (e instanceof PaymentVerificationException)
+                throw (PaymentVerificationException) e;
             throw new PaymentVerificationException("Failed to verify webhook signature: " + e.getMessage());
         }
     }
 
-    private String calculateHmacSha256(String data, String secret) throws NoSuchAlgorithmException, InvalidKeyException {
+    private String calculateHmacSha256(String data, String secret)
+            throws NoSuchAlgorithmException, InvalidKeyException {
         Mac mac = Mac.getInstance("HmacSHA256");
         SecretKeySpec secretKey = new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
         mac.init(secretKey);

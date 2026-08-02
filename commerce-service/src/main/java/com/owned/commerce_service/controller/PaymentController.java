@@ -25,13 +25,15 @@ public class PaymentController {
     public ResponseEntity<Map<String, Object>> handleWebhook(
             @RequestHeader(value = "X-Razorpay-Signature", required = false) String razorpaySignature,
             @RequestHeader(value = "Stripe-Signature", required = false) String stripeSignature,
+            @RequestHeader(value = "X-UPI-Signature", required = false) String upiSignature,
             @RequestHeader(value = "X-Webhook-Signature", required = false) String genericSignature,
             @RequestParam(required = false) String providerTxnId,
             @RequestParam(required = false, defaultValue = "payment.succeeded") String eventType,
             @RequestBody(required = false) String rawPayload
     ) {
         String signature = razorpaySignature != null ? razorpaySignature
-                : (stripeSignature != null ? stripeSignature : genericSignature);
+                : (stripeSignature != null ? stripeSignature
+                : (upiSignature != null ? upiSignature : genericSignature));
 
         String txnId = providerTxnId;
         String resolvedEventType = eventType;
