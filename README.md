@@ -10,58 +10,6 @@
 
 The platform operates as a distributed event-driven microservices architecture. Client applications connect through a centralized **Spring Cloud API Gateway** which validates authentication tokens and routes requests dynamically using **Netflix Eureka Service Discovery**. Core domain logic is split across independent bounded contexts (**User**, **Commerce**, **Collection**), communicating synchronously via REST APIs and asynchronously via **Apache Kafka** event topics.
 
-```mermaid
-flowchart TB
-    subgraph Client Layer
-        FE["📱 Owned Frontend (React + Vite)\nhttp://localhost:5173"]
-    end
-
-    subgraph Edge & Security Layer
-        EUREKA["🔍 Service Registry (Eureka)\nport 8761"]
-        GW["🛡️ API Gateway (Spring Cloud Gateway)\nport 8080"]
-    end
-
-    subgraph Microservices Domain Layer
-        USER["👤 User Service\nport 8081"]
-        COMMERCE["🛒 Commerce Service\nport 8082"]
-        COLLECTION["📦 Collection Service\nport 8083"]
-    end
-
-    subgraph Asynchronous Event Bus
-        KAFKA["⚡ Apache Kafka Broker (KRaft)\nport 9092 / 29092"]
-        KAFKA_UI["📊 Kafka UI Dashboard\nhttp://localhost:8090"]
-    end
-
-    subgraph Persistence Layer (Local MySQL 8.0)
-        DB_USER[("🗄️ owned_users\n(Users, Auth, Profiles, Notifications)")]
-        DB_COMMERCE[("🗄️ owned_commerce\n(Products, Categories, Orders, Wallet)")]
-        DB_COLLECTION[("🗄️ owned_collection\n(User Collections, Digital Assets)")]
-    end
-
-    %% Edge Interactions
-    FE -->|HTTPS / REST| GW
-    GW <-->|Service Lookup / Heartbeat| EUREKA
-    USER <-->|Register Instance| EUREKA
-    COMMERCE <-->|Register Instance| EUREKA
-    COLLECTION <-->|Register Instance| EUREKA
-
-    %% Routing
-    GW -->|/api/auth/**, /api/users/**| USER
-    GW -->|/api/products/**, /api/orders/**, /api/wallet/**, /api/payments/**| COMMERCE
-    GW -->|/api/collection/**| COLLECTION
-
-    %% DB Connections
-    USER --> DB_USER
-    COMMERCE --> DB_COMMERCE
-    COLLECTION --> DB_COLLECTION
-
-    %% Event Streams
-    COMMERCE -->|Publish: order-completed-topic| KAFKA
-    COMMERCE -->|Publish: user-events| KAFKA
-    COLLECTION -->|Subscribe: order-completed-topic| KAFKA
-    USER -->|Subscribe: user-events| KAFKA
-    KAFKA_UI -.->|Monitor Brokers & Topics| KAFKA
-```
 
 ---
 
