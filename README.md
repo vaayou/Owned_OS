@@ -8,55 +8,6 @@
 
 The platform follows a distributed microservices architecture where client requests route through a single entry point (API Gateway), authenticated via JWTs, and synchronized asynchronously using Kafka event streaming.
 
-```mermaid
-flowchart TB
-    subgraph Client Layer
-        FE["📱 Owned Frontend (React + Vite)\nhttp://localhost:5173"]
-    end
-
-    subgraph Edge & Discovery Layer
-        EUREKA["🔍 Eureka Service Registry\n(port 8761)"]
-        GW["🛡️ Spring Cloud Gateway\n(port 8080)"]
-    end
-
-    subgraph Microservices Layer
-        USER["👤 User Service\n(port 8081)"]
-        COMMERCE["🛒 Commerce Service\n(port 8082)"]
-        COLLECTION["📦 Collection Service\n(port 8083)"]
-    end
-
-    subgraph Event Streaming & Messaging
-        KAFKA["⚡ Apache Kafka Broker (KRaft)\n(port 9092 / 29092)"]
-        KAFKA_UI["📊 Kafka UI Dashboard\nhttp://localhost:8090"]
-    end
-
-    subgraph Persistence Layer (Local MySQL)
-        DB_USER[("🗄️ owned_users")]
-        DB_COMMERCE[("🗄️ owned_commerce")]
-        DB_COLLECTION[("🗄️ owned_collection")]
-    end
-
-    %% Communications
-    FE -->|HTTP / REST| GW
-    GW <-->|Service Discovery| EUREKA
-    USER <-->|Register with Eureka| EUREKA
-    COMMERCE <-->|Register with Eureka| EUREKA
-    COLLECTION <-->|Register with Eureka| EUREKA
-
-    GW -->|/api/auth/**, /api/users/**| USER
-    GW -->|/api/products/**, /api/orders/**, /api/wallet/**, /api/payments/**| COMMERCE
-    GW -->|/api/collections/**| COLLECTION
-
-    USER --> DB_USER
-    COMMERCE --> DB_COMMERCE
-    COLLECTION --> DB_COLLECTION
-
-    COMMERCE -->|Publish: order-completed-topic| KAFKA
-    COLLECTION -->|Consume: order-completed-topic| KAFKA
-    USER -->|Consume: user-events| KAFKA
-    KAFKA_UI -.->|Monitor| KAFKA
-```
-
 ### Microservices Breakdown
 
 | Service | Port | Database | Primary Responsibility |
