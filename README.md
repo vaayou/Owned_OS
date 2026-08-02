@@ -4,9 +4,11 @@
 
 ---
 
-## 📌 1. High-Level Architecture (HLD)
+## 📌 1. Comprehensive High-Level Design (HLD)
 
-The platform follows a distributed microservices architecture where client requests route through a single entry point (API Gateway), authenticated via JWTs, and synchronized asynchronously using Kafka event streaming.
+### 1.1 Overall System Topology
+
+The platform operates as a distributed event-driven microservices architecture. Client applications connect through a centralized **Spring Cloud API Gateway** which validates authentication tokens and routes requests dynamically using **Netflix Eureka Service Discovery**. Core domain logic is split across independent bounded contexts (**User**, **Commerce**, **Collection**), communicating synchronously via REST APIs and asynchronously via **Apache Kafka** event topics.
 
 ```mermaid
 flowchart TB
@@ -14,61 +16,234 @@ flowchart TB
         FE["📱 Owned Frontend (React + Vite)\nhttp://localhost:5173"]
     end
 
-    subgraph Edge & Discovery Layer
-        EUREKA["🔍 Eureka Service Registry\n(port 8761)"]
-        GW["🛡️ Spring Cloud Gateway\n(port 8080)"]
+    subgraph Edge & Security Layer
+        EUREKA["🔍 Service Registry (Eureka)\nport 8761"]
+        GW["🛡️ API Gateway (Spring Cloud Gateway)\nport 8080"]
     end
 
-    subgraph Microservices Layer
-        USER["👤 User Service\n(port 8081)"]
-        COMMERCE["🛒 Commerce Service\n(port 8082)"]
-        COLLECTION["📦 Collection Service\n(port 8083)"]
+    subgraph Microservices Domain Layer
+        USER["👤 User Service\nport 8081"]
+        COMMERCE["🛒 Commerce Service\nport 8082"]
+        COLLECTION["📦 Collection Service\nport 8083"]
     end
 
-    subgraph Event Streaming & Messaging
-        KAFKA["⚡ Apache Kafka Broker (KRaft)\n(port 9092 / 29092)"]
+    subgraph Asynchronous Event Bus
+        KAFKA["⚡ Apache Kafka Broker (KRaft)\nport 9092 / 29092"]
         KAFKA_UI["📊 Kafka UI Dashboard\nhttp://localhost:8090"]
     end
 
-    subgraph Persistence Layer (Local MySQL)
-        DB_USER[("🗄️ owned_users")]
-        DB_COMMERCE[("🗄️ owned_commerce")]
-        DB_COLLECTION[("🗄️ owned_collection")]
+    subgraph Persistence Layer (Local MySQL 8.0)
+        DB_USER[("🗄️ owned_users\n(Users, Auth, Profiles, Notifications)")]
+        DB_COMMERCE[("🗄️ owned_commerce\n(Products, Categories, Orders, Wallet)")]
+        DB_COLLECTION[("🗄️ owned_collection\n(User Collections, Digital Assets)")]
     end
 
-    %% Communications
-    FE -->|HTTP / REST| GW
-    GW <-->|Service Discovery| EUREKA
-    USER <-->|Register with Eureka| EUREKA
-    COMMERCE <-->|Register with Eureka| EUREKA
-    COLLECTION <-->|Register with Eureka| EUREKA
+    %% Edge Interactions
+    FE -->|HTTPS / REST| GW
+    GW <-->|Service Lookup / Heartbeat| EUREKA
+    USER <-->|Register Instance| EUREKA
+    COMMERCE <-->|Register Instance| EUREKA
+    COLLECTION <-->|Register Instance| EUREKA
 
+    %% Routing
     GW -->|/api/auth/**, /api/users/**| USER
     GW -->|/api/products/**, /api/orders/**, /api/wallet/**, /api/payments/**| COMMERCE
-    GW -->|/api/collections/**| COLLECTION
+    GW -->|/api/collection/**| COLLECTION
 
+    %% DB Connections
     USER --> DB_USER
     COMMERCE --> DB_COMMERCE
     COLLECTION --> DB_COLLECTION
 
+    %% Event Streams
     COMMERCE -->|Publish: order-completed-topic| KAFKA
-    COLLECTION -->|Consume: order-completed-topic| KAFKA
-    USER -->|Consume: user-events| KAFKA
-    KAFKA_UI -.->|Monitor| KAFKA
+    COMMERCE -->|Publish: user-events| KAFKA
+    COLLECTION -->|Subscribe: order-completed-topic| KAFKA
+    USER -->|Subscribe: user-events| KAFKA
+    KAFKA_UI -.->|Monitor Brokers & Topics| KAFKA
 ```
 
-### Microservices Breakdown
+---
 
-| Service | Port | Database | Primary Responsibility |
-| :--- | :--- | :--- | :--- |
-| **eureka-service** | `8761` | N/A | Service Discovery Registry. Registers all microservices for dynamic routing and load balancing. |
-| **gateway** | `8080` | N/A | Edge API Gateway. Handles JWT validation, rate limiting, and request routing to downstream microservices. |
-| **user-service** | `8081` | `owned_users` | Manages user registration, login, JWT token issuance/refresh, user profiles, and in-app notifications. |
-| **commerce-service**| `8082` | `owned_commerce` | Handles product catalog, categories, cart management, checkout logic, wallet coins, UPI payment gateway integration, and publishes checkout events. |
-| **collection-service**| `8083` | `owned_collection` | Digital asset / user collection library. Consumes order events from Kafka to automatically credit purchased items into the user's personal collection. |
-| **owned-frontend** | `5173` | N/A | Single Page Application (SPA) built with React, Vite, Lucide Icons, and Tailwind CSS. |
-| **Kafka (Docker)** | `9092` | N/A | High-throughput asynchronous event streaming broker (KRaft mode). |
-| **Kafka UI (Docker)**| `8090` | N/A | Web UI management console for inspecting Kafka topics, consumer groups, and messages. |
+### 1.2 Microservice-by-Microservice High-Level Design (HLD)
+
+---
+
+#### 🔍 A. Service Discovery (`eureka-service`)
+* **Port**: `8761`
+* **Technology**: Spring Cloud Netflix Eureka Server
+* **Purpose**: Serves as the central service registry for instance registration and dynamic service location lookup.
+
+```
+       +------------------------------------+
+       |          Eureka Registry           |
+       |  (Stores Service Name -> IP:Port)  |
+       +------------------------------------+
+           ▲            ▲            ▲
+           │ Heartbeat  │ Heartbeat  │ Heartbeat
+     [user-service] [commerce-service] [collection-service]
+```
+
+* **Core Responsibilities**:
+  - Maintains real-time registry of all active microservice instances.
+  - Enables client-side load balancing (`lb://user-service`, `lb://commerce-service`, etc.) without hardcoding hostnames.
+  - Automatically handles health checks and evicts unresponsive service instances.
+* **Inbound Interfaces**:
+  - `GET /eureka/apps` – Registry status endpoint.
+  - `http://localhost:8761` – Web Dashboard UI.
+* **Dependencies**: None.
+
+---
+
+#### 🛡️ B. Edge API Gateway (`gateway`)
+* **Port**: `8080`
+* **Technology**: Spring Cloud Gateway (MVC Stack), Spring Security, JJWT
+* **Purpose**: Single entry point for all client requests. Manages unified routing, request prefix stripping, CORS configuration, and JWT authentication verification.
+
+```
+[ Client Request ] ──► [ Gateway Filters ] ──► [ Eureka Lookup ] ──► [ Target Microservice ]
+                         │ JWT Validation
+                         │ Path Stripping
+```
+
+* **Core Responsibilities**:
+  - **Dynamic Routing & Path Stripping**:
+    - `/api/auth/**`, `/api/users/**` ──► `lb://user-service`
+    - `/api/products/**`, `/api/orders/**`, `/api/wallet/**`, `/api/payments/**` ──► `lb://commerce-service`
+    - `/api/collection/**`, `/api/certificates/**` ──► `lb://collection-service`
+  - **Security & Authorization**: Validates incoming Authorization Bearer JWT signatures against a shared HMAC-SHA256 secret.
+  - **CORS Handling**: Provides unified Cross-Origin Resource Sharing policy for web frontend origins (`http://localhost:5173`).
+* **Dependencies**: `eureka-service` (for service resolution).
+
+---
+
+#### 👤 C. User Service (`user-service`)
+* **Port**: `8081`
+* **Database**: MySQL (`owned_users`)
+* **Technology**: Spring Boot, Spring Security (BCrypt), JPA/Hibernate, Apache Kafka Client
+* **Purpose**: Manages user identity, authentication, credential validation, user profile attributes, and real-time user notification logs.
+
+```
+  +-----------------------------------------------------------------------+
+  |                             USER SERVICE                              |
+  |  +--------------------+   +-------------------+   +----------------+  |
+  |  | Authentication     |   | Profile Manager   |   | Notification   |  |
+  |  | (JWT & Refresh)    |   | (User Attributes) |   | Consumer       |  |
+  |  +--------------------+   +-------------------+   +----------------+  |
+  +-----------------------------------------------------------------------+
+            │                         │                       ▲
+            ▼                         ▼                       │ Consume
+     [ owned_users DB ]        [ owned_users DB ]      [ Kafka: user-events ]
+```
+
+* **Core Sub-Modules**:
+  1. **Auth & Identity Manager**: Handles registration, BCrypt password hashing, login verification, access token generation, and refresh token rotation.
+  2. **Profile Manager**: Manages user bio, avatars, display names, and preference settings.
+  3. **Notification Consumer & Engine**: Listens to the `user-events` Kafka topic to store in-app notifications (e.g., purchase confirmations, system alerts).
+* **Inbound Interfaces (REST)**:
+  - `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`
+  - `GET /users/profile`, `PUT /users/profile`
+  - `GET /users/notifications`
+* **Outbound Dependencies**: `owned_users` MySQL DB, Kafka Topic (`user-events`).
+
+---
+
+#### 🛒 D. Commerce Service (`commerce-service`)
+* **Port**: `8082`
+* **Database**: MySQL (`owned_commerce`)
+* **Technology**: Spring Boot, Spring Data JPA, Apache Kafka Producer, Transactional Event Publisher
+* **Purpose**: Core e-commerce engine handling catalog browsing, cart operations, checkout transactional workflows, digital wallet balances, and UPI/Payment integrations.
+
+```
++-----------------------------------------------------------------------------------+
+|                                 COMMERCE SERVICE                                  |
+|  +-------------------+  +-------------------+  +------------------+  +---------+  |
+|  | Catalog & Search  |  | Cart & Checkout   |  | Wallet System    |  | Payment |  |
+|  | (Products/Cat.)   |  | (Order Creation)  |  | (Coins Ledger)   |  | (UPI)   |  |
+|  +-------------------+  +-------------------+  +------------------+  +---------+  |
++-----------------------------------------------------------------------------------+
+            │                       │                      │
+            ▼                       ▼                      ▼
+    [ owned_commerce DB ]   [ Transactional Event ] ──► [ Kafka: order-completed-topic ]
+```
+
+* **Core Sub-Modules**:
+  1. **Catalog Engine**: Manages 150+ product listings across categories ranging from everyday essentials to ultra-luxury items.
+  2. **Wallet Coins Ledger**: Maintains user coin balances (`coin_balance`) and transaction logs (`CREDIT`/`DEBIT`).
+  3. **Order & Checkout Manager**: Executes atomic checkout operations—validates stock and coin balance, debits wallet, creates completed orders, and fires transactional domain events.
+  4. **Payment Gateway Integration**: Simulates and manages UPI / Stripe / Razorpay payment order initiation and verification hooks.
+  5. **Kafka Event Producer**: Publishes `OrderCompletedEvent` payloads to Kafka after DB transaction commit (`TransactionPhase.AFTER_COMMIT`).
+* **Inbound Interfaces (REST)**:
+  - `GET /products`, `GET /products/{id}`, `GET /categories`
+  - `POST /orders/checkout`, `GET /orders`
+  - `GET /wallet/balance`, `POST /wallet/add-coins`
+  - `POST /payments/create-order`, `POST /payments/verify`
+* **Outbound Dependencies**: `owned_commerce` MySQL DB, Kafka Topic (`order-completed-topic`, `user-events`).
+
+---
+
+#### 📦 E. Collection Service (`collection-service`)
+* **Port**: `8083`
+* **Database**: MySQL (`owned_collection`)
+* **Technology**: Spring Boot, Spring Data JPA, Apache Kafka Listener, Jackson JSON
+* **Purpose**: Manages the user's digital asset vault and collection library. Consumes asynchronous order completion events from Kafka to automatically credit purchased items to the buyer's collection.
+
+```
+                  +-----------------------------------------+
+                  |           COLLECTION SERVICE            |
+                  |  +-------------------+  +------------+  |
+                  |  | Kafka Consumer    |  | Asset Vault|  |
+                  |  | (order-completed) |  | REST API   |  |
+                  |  +-------------------+  +------------+  |
+                  +-----------------------------------------+
+                                 ▲                 │
+                         Consume │                 ▼
+        [ Kafka: order-completed-topic ]    [ owned_collection DB ]
+```
+
+* **Core Sub-Modules**:
+  1. **Order Consumer Listener**: `@KafkaListener` consuming messages on `order-completed-topic`. Translates order items into collection asset entries.
+  2. **Collection Vault Engine**: Manages collection cataloging, item ownership lookup, and acquisition history tracking.
+* **Inbound Interfaces (REST)**:
+  - `GET /collection` – Get logged-in user's collection items.
+  - `GET /collection/{itemId}` – Get item details.
+* **Outbound Dependencies**: `owned_collection` MySQL DB, Kafka Topic (`order-completed-topic`).
+
+---
+
+#### 📱 F. Owned Frontend (`owned-frontend`)
+* **Port**: `5173`
+* **Technology**: React 18, Vite, Modern CSS (Glassmorphism), Lucide React Icons
+* **Purpose**: Modern, responsive e-commerce web application inspired by Amazon, Flipkart, and Myntra.
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        OWNED FRONTEND UI                               │
+│ ┌──────────────┐ ┌──────────────┐ ┌───────────────┐ ┌────────────────┐ │
+│ │ Navbar & Auth│ │ Hero Banners │ │ Product Grid  │ │ Cart Drawer    │ │
+│ └──────────────┘ └──────────────┘ └───────────────┘ └────────────────┘ │
+│ ┌──────────────┐ ┌──────────────┐ ┌───────────────┐ ┌────────────────┐ │
+│ │ Product Modal│ │ UPI Checkout │ │ Leaderboard   │ │ Collection View│ │
+│ └──────────────┘ └──────────────┘ └───────────────┘ └────────────────┘ │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+* **Core User Flows**:
+  - **Browsing & Search**: Search products, filter by category/tier, view product details.
+  - **Cart & Wallet Checkout**: Manage cart items, inspect coin balance, complete instant coin checkout or UPI payment.
+  - **User Collection Library**: View personal digital asset collection immediately after checkout.
+* **Dependencies**: API Gateway (`http://localhost:8080`).
+
+---
+
+#### ⚡ G. Event Streaming Infrastructure (`Kafka + KRaft`)
+* **Ports**: `9092` (Host App Broker), `29092` (Internal Container Network), `8090` (Kafka UI)
+* **Technology**: Confluent Kafka (`cp-kafka:7.7.0`) in KRaft Mode + Provectus Kafka UI
+* **Purpose**: Decouples microservice workloads by providing high-throughput, fault-tolerant asynchronous event channels.
+
+* **Kafka Topics Summary**:
+  1. `order-completed-topic` (3 Partitions, Replication 1): Published by `commerce-service` when an order is completed; consumed by `collection-service` for asset fulfillment.
+  2. `user-events` (3 Partitions, Replication 1): Published on user activities; consumed by `user-service` to log user notifications.
 
 ---
 
@@ -300,8 +475,8 @@ All external API requests must be routed through the **API Gateway** (`http://lo
 - `POST /api/payments/verify` – Verify UPI payment signature / transaction
 
 ### 📦 User Collection (`/api/collections/**`)
-- `GET /api/collections` – Fetch user's owned asset library
-- `GET /api/collections/{itemId}` – Fetch detailed view of an owned item
+- `GET /api/collection` – Fetch user's owned asset library
+- `GET /api/collection/{itemId}` – Fetch detailed view of an owned item
 
 ---
 
