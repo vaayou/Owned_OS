@@ -11,6 +11,9 @@
 		},
 		{
 			"path": "../user-service"
+		},
+		{
+			"path": "../eureka-service"
 		}
 	],
 	"settings": {

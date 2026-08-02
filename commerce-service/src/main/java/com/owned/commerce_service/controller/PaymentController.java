@@ -1,5 +1,7 @@
 package com.owned.commerce_service.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.owned.commerce_service.entity.PaymentRecord;
 import com.owned.commerce_service.service.PaymentService;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +17,8 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class PaymentController {
 
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     private final PaymentService paymentService;
 
     @PostMapping("/webhook")
@@ -24,18 +28,31 @@ public class PaymentController {
             @RequestHeader(value = "X-Webhook-Signature", required = false) String genericSignature,
             @RequestParam(required = false) String providerTxnId,
             @RequestParam(required = false, defaultValue = "payment.succeeded") String eventType,
-            @RequestBody(required = false) Map<String, Object> bodyPayload,
             @RequestBody(required = false) String rawPayload
     ) {
         String signature = razorpaySignature != null ? razorpaySignature
                 : (stripeSignature != null ? stripeSignature : genericSignature);
 
         String txnId = providerTxnId;
-        if (txnId == null && bodyPayload != null) {
-            if (bodyPayload.containsKey("providerTxnId")) {
-                txnId = String.valueOf(bodyPayload.get("providerTxnId"));
-            } else if (bodyPayload.containsKey("id")) {
-                txnId = String.valueOf(bodyPayload.get("id"));
+        String resolvedEventType = eventType;
+
+        if (rawPayload != null && !rawPayload.isBlank()) {
+            try {
+                JsonNode rootNode = OBJECT_MAPPER.readTree(rawPayload);
+                if (txnId == null) {
+                    if (rootNode.has("providerTxnId")) {
+                        txnId = rootNode.get("providerTxnId").asText();
+                    } else if (rootNode.has("id")) {
+                        txnId = rootNode.get("id").asText();
+                    }
+                }
+                if (rootNode.has("eventType")) {
+                    resolvedEventType = rootNode.get("eventType").asText();
+                } else if (rootNode.has("event")) {
+                    resolvedEventType = rootNode.get("event").asText();
+                }
+            } catch (Exception e) {
+                log.debug("Webhook raw payload is not JSON: {}", e.getMessage());
             }
         }
 
@@ -48,7 +65,7 @@ public class PaymentController {
 
         PaymentRecord record = paymentService.processWebhook(
                 txnId,
-                eventType,
+                resolvedEventType,
                 signature,
                 rawPayload != null ? rawPayload : ""
         );

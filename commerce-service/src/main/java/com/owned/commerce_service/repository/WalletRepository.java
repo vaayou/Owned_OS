@@ -1,5 +1,3 @@
-package com.owned.commerce_service.entity; // wait, repository package
-
 package com.owned.commerce_service.repository;
 
 import com.owned.commerce_service.entity.Wallet;

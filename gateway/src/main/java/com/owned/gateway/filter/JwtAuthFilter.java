@@ -30,7 +30,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private static final List<String> OPEN_PATHS = List.of(
             "/api/auth/login",
-            "/api/auth/register"
+            "/api/auth/register",
+            "/api/auth/refresh",
+            "/api/payments/webhook",
+            "/api/products",
+            "/api/categories",
+            "/actuator"
     );
 
     private final SecretKey signingKey;
@@ -45,6 +50,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             HttpServletResponse response,
             FilterChain filterChain
     ) throws ServletException, IOException {
+
+        // Allow CORS pre-flight OPTIONS requests through immediately
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            filterChain.doFilter(request, response);
+            return;
+        }
 
         String path = request.getRequestURI();
 
@@ -89,7 +100,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
         HeaderInjectingRequestWrapper(HttpServletRequest request, String userId, String username) {
             super(request);
-            this.extraHeaders = new HashMap<>();
+            this.extraHeaders = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
             if (userId   != null) extraHeaders.put("X-User-Id",  userId);
             if (username != null) extraHeaders.put("X-Username", username);
         }

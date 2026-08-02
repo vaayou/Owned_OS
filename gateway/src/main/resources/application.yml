@@ -5,6 +5,15 @@ spring:
   application:
     name: gateway
 
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_SERVER_URL:http://localhost:8761/eureka/}
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+
 jwt:
   # Default must be ≥ 32 chars (256 bits) for HS256 — override via JWT_SECRET env var in prod
-  secret: ${JWT_SECRET:change-this-in-prod-min32chars!!}
+  secret: ${JWT_SECRET:owned-super-secret-jwt-signing-key-change-in-production}

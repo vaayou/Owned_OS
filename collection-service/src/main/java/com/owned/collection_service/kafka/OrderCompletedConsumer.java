@@ -20,18 +20,10 @@ public class OrderCompletedConsumer {
             topics = {"order-completed-topic", "orders"},
             groupId = "${spring.kafka.consumer.group-id}"
     )
-    public void consumeOrderCompleted(Object record) {
+    public void consumeOrderCompleted(String record) {
         log.info("Received OrderCompleted message from Kafka: {}", record);
         try {
-            OrderCompletedEvent event;
-            if (record instanceof String jsonStr) {
-                event = objectMapper.readValue(jsonStr, OrderCompletedEvent.class);
-            } else if (record instanceof OrderCompletedEvent evt) {
-                event = evt;
-            } else {
-                String jsonStr = objectMapper.writeValueAsString(record);
-                event = objectMapper.readValue(jsonStr, OrderCompletedEvent.class);
-            }
+            OrderCompletedEvent event = objectMapper.readValue(record, OrderCompletedEvent.class);
 
             if (event != null && event.getOrderId() != null) {
                 collectionService.addItemsFromOrder(event);
