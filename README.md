@@ -1,6 +1,13 @@
 # 🏆 Owned OS – Microservices E-Commerce & Asset Management System
 
+> 🌐 **Live Cloud URL**: [http://3.6.39.23/](http://3.6.39.23/)  
+> 🐳 **Docker Hub Registry**: [`heavycoder`](https://hub.docker.com/u/heavycoder)  
+> ☁️ **Cloud Host**: AWS EC2 (Single-Instance Containerized Microservices Architecture)
+
+---
+
 **Owned OS** is an enterprise-grade, event-driven e-commerce platform built with **Spring Boot Microservices**, **Apache Kafka**, **MySQL**, **Spring Cloud Gateway**, **Netflix Eureka Service Discovery**, and a modern **React + Vite** frontend inspired by top e-commerce platforms (Amazon, Flipkart, Myntra).
+
 
 ---
 
@@ -401,7 +408,127 @@ npm run dev
 
 ---
 
-## 🌐 5. Key API Endpoints & Routes
+## 🚀 5. AWS EC2 Cloud Deployment Architecture
+
+The entire platform is containerized and hosted live on **AWS EC2**, orchestrated via Docker Compose with JVM-tuned microservices and an Nginx reverse proxy.
+
+* **Live Platform URL**: [http://3.6.39.23/](http://3.6.39.23/)
+* **Docker Hub Registry**: [`hub.docker.com/u/heavycoder`](https://hub.docker.com/u/heavycoder)
+* **Security Group Configuration**: Only **Port 80 (HTTP)** and **Port 22 (SSH)** are exposed to the internet. All internal microservices, Eureka, Kafka, and MySQL communicate purely over the internal Docker bridge network.
+
+```
+                      INTERNET / WEB BROWSER
+                                │
+                      ┌─────────▼─────────┐
+                      │  AWS EC2 Instance │
+                      │  (IP: 3.6.39.23)  │
+                      └─────────┬─────────┘
+                                │
+                 ┌──────────────▼──────────────┐
+                 │    Nginx (Port 80 / HTTP)   │
+                 └──────┬───────────────┬──────┘
+                        │               │
+         Static Assets  │               │ Requests to `/api/**`
+        (React 19 SPA)  │               │
+    ┌───────────────────▼──┐     ┌──────▼────────┐
+    │ owned-frontend       │     │ gateway:8080  │
+    └──────────────────────┘     └──────┬────────┘
+                                        │
+                         ┌──────────────┴──────────────┐
+                         │ Dynamic Routing via Eureka  │
+                         │                             ▼
+           ┌─────────────┼──────────────┐      ┌───────────────┐
+           │             │              │      │ eureka:8761   │
+           ▼             ▼              ▼      │ Service Reg.  │
+    ┌─────────────┐┌─────────────┐┌────────────┤               │
+    │user-service ││commerce-serv││collection- │└───────────────┘
+    │ (port 8081) ││ (port 8082) ││service:8083│
+    └──────┬──────┘└──────┬──────┘└─────┬──────┘
+           │              │             │
+           ├──────────────┴─────────────┤
+           │  Docker Internal Network   │
+           ▼                            ▼
+    ┌──────────────┐             ┌──────────────┐
+    │ mysql:3306   │             │ kafka:29092  │
+    │ (3 Databases)│             │ (KRaft Mode) │
+    └──────────────┘             └──────────────┘
+```
+
+---
+
+### 5.1 Docker Hub Image Registry
+
+All 6 custom application images are pre-built for `linux/amd64` architecture and maintained on Docker Hub:
+
+| Service | Docker Hub Image | Responsibilities & Port |
+| :--- | :--- | :--- |
+| **Service Discovery** | `heavycoder/owned-eureka:latest` | Netflix Eureka Registry (`8761`) |
+| **API Gateway** | `heavycoder/owned-gateway:latest` | Edge Routing & Security (`8080`) |
+| **User Service** | `heavycoder/owned-user-service:latest` | Auth, Users & Profiles (`8081`) |
+| **Commerce Service** | `heavycoder/owned-commerce-service:latest` | Catalog, Orders, Wallet (`8082`) |
+| **Collection Service**| `heavycoder/owned-collection-service:latest` | Digital Assets & Library (`8083`) |
+| **Frontend UI** | `heavycoder/owned-frontend:latest` | React + Vite served via Nginx (`80`) |
+
+---
+
+### 5.2 EC2 Sizing & JVM Memory Optimization
+
+To run 5 Spring Boot microservices, Kafka KRaft, MySQL, and Nginx on a single EC2 instance without triggering out-of-memory crashes, strict memory allocations are enforced:
+
+| Container | Memory Limit / Heap Setting | Role |
+| :--- | :--- | :--- |
+| **User Service** | `-Xms256m -Xmx384m` | Spring Boot JPA Service |
+| **Commerce Service** | `-Xms256m -Xmx384m` | Spring Boot JPA Service |
+| **Collection Service** | `-Xms256m -Xmx384m` | Spring Boot JPA Service |
+| **Gateway** | `-Xms192m -Xmx256m` | Spring Cloud Gateway MVC |
+| **Eureka** | `-Xms192m -Xmx256m` | Service Registry |
+| **Kafka (KRaft)** | `-Xms512m -Xmx768m` | Single-node Event Broker |
+| **MySQL 8.0** | `--innodb-buffer-pool-size=512M` | Multi-Schema Database |
+| **Frontend** | ~20 MB (Nginx Alpine) | Static Asset Server & Proxy |
+| **Total Memory** | **~6 GB – 8 GB RAM** | Fits comfortably on `t3.large` / `t4g.large` |
+
+---
+
+### 5.3 Step-by-Step EC2 Deployment Guide
+
+#### 1. Build and Push Images from Local Machine
+Using the included automated scripts:
+```cmd
+# Windows (PowerShell / Command Prompt)
+push-to-dockerhub.bat
+
+# Linux / macOS / WSL
+./push-to-dockerhub.sh
+```
+
+#### 2. Launch on EC2
+On the EC2 VM (in `~/owned` directory):
+```bash
+# Pull the latest prebuilt images from Docker Hub (~30 seconds)
+docker compose -f docker-compose.prod.yml pull
+
+# Start the full platform
+docker compose -f docker-compose.prod.yml up -d
+
+# Verify all containers are healthy
+docker compose -f docker-compose.prod.yml ps
+```
+
+#### 3. Seed Catalog Products
+Seed the catalog with 150+ products inside the MySQL container:
+```bash
+docker exec -i owned-mysql mysql -u root -proot owned_commerce < seed_150_products.sql
+```
+
+#### 4. Access Live Platform
+Open your browser and navigate to:
+```text
+http://3.6.39.23/
+```
+
+---
+
+## 🌐 6. Key API Endpoints & Routes
 
 All external API requests must be routed through the **API Gateway** (`http://localhost:8080`).
 
@@ -428,7 +555,7 @@ All external API requests must be routed through the **API Gateway** (`http://lo
 
 ---
 
-## 📂 6. Postman API Collections
+## 📂 7. Postman API Collections
 
 Pre-built Postman collections are included in the repository root for immediate testing:
 - [Owned_OS_Postman_Collection.json](file:///d:/V/Project/13_Owned/Owned_OS_Postman_Collection.json)
@@ -436,7 +563,7 @@ Pre-built Postman collections are included in the repository root for immediate 
 
 ---
 
-## ⚡ 7. Troubleshooting & FAQ
+## ⚡ 8. Troubleshooting & FAQ
 
 - **Kafka Connection Refused (`localhost:9092`)**: Make sure `docker compose up -d` was executed and container `owned-kafka` status shows `healthy`.
 - **Database Connection Failure**: Ensure local MySQL is running on `3306` with user `root` and password `root`.
