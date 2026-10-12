@@ -1,4 +1,6 @@
 # 🏆 Owned OS – Microservices E-Commerce & Asset Management System
+<img width="1909" height="990" alt="image" src="https://github.com/user-attachments/assets/7816f68d-1ae9-4882-9a04-3648f0aba43c" />
+
 
 > 🌐 **Live Cloud URL**: [http://3.6.39.23/](http://3.6.39.23/)  
 > 🐳 **Docker Hub Registry**: [`heavycoder`](https://hub.docker.com/u/heavycoder)  
