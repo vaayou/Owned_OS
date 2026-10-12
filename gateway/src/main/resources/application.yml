@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: ${PORT:8080}
 
 spring:
   application:
@@ -14,6 +14,15 @@ eureka:
   instance:
     prefer-ip-address: true
 
+services:
+  user-service:
+    uri: ${USER_SERVICE_URI:lb://user-service}
+  commerce-service:
+    uri: ${COMMERCE_SERVICE_URI:lb://commerce-service}
+  collection-service:
+    uri: ${COLLECTION_SERVICE_URI:lb://collection-service}
+
 jwt:
   # Default must be ≥ 32 chars (256 bits) for HS256 — override via JWT_SECRET env var in prod
   secret: ${JWT_SECRET:owned-super-secret-jwt-signing-key-change-in-production}
+
